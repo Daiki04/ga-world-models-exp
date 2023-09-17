@@ -57,21 +57,21 @@ class RolloutGenerator(object):
             - action: 1D np array
             - next_hidden (1 x 256) torch tensor
         """
-        _, latent_mu, _ = self.vae(obs) # latent_mu: 潜在ベクトルの期待値
+        _, latent_z, _, _ = self.vae(obs) # latent_z: 潜在ベクトルの期待値
 
         # Discrete VAEの場合、離散化する
         if (self.discrete_VAE):  
 
             bins=np.array([-1.0,0.0,1.0]) # 
 
-            latent_mu = torch.tanh(latent_mu) # 潜在ベクトルの期待値を[-1,1]に変換
-            newdata=bins[np.digitize(latent_mu,bins[1:])]+1 # latent_muをdigitizeし、[0,1]に変換（0以下：0, 0より大きい：1), 1を足すことで[0, 1]に変換
+            latent_z = torch.tanh(latent_z) # 潜在ベクトルの期待値を[-1,1]に変換
+            newdata=bins[np.digitize(latent_z,bins[1:])]+1 # latent_zをdigitizeし、[0,1]に変換（0以下：0, 0より大きい：1), 1を足すことで[0, 1]に変換
 
-            latent_mu = torch.from_numpy(newdata).float() # latent_muをtorch tensorに変換
+            latent_z = torch.from_numpy(newdata).float() # latent_zをtorch tensorに変換
 
-        action = self.controller(latent_mu, hidden[0] ) # コントローラーによるアクションの計算
+        action = self.controller(latent_z, hidden[0] ) # コントローラーによるアクションの計算
 
-        mus, sigmas, logpi, rs, d, next_hidden = self.mdrnn(action, latent_mu, hidden) # MDRNNによる次の潜在状態と次の隠れ状態の推定
+        mus, sigmas, logpi, rs, d, next_hidden = self.mdrnn(action, latent_z, hidden) # MDRNNによる次の潜在状態と次の隠れ状態の推定
 
         return action.squeeze().cpu().numpy(), next_hidden
 

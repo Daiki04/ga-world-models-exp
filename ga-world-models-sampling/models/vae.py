@@ -72,4 +72,4 @@ class VAE(nn.Module):
         z = eps.mul(sigma).add_(mu)
 
         recon_x = self.decoder(z)
-        return recon_x, mu, logsigma
+        return recon_x, z, mu, logsigma
