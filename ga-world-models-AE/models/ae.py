@@ -18,10 +18,13 @@ class AE_Encoder(nn.Module):
         self.img_channels = img_channels
 
         self.conv1 = nn.Conv2d(img_channels, 16, kernel_size=3, stride=2, padding=1) # (3, 64, 64) -> (16, 32, 32)
+        # self.conv1 = nn.Conv2d(img_channels, 16, kernel_size=6, stride=4, padding=2) # (3, 64, 64) -> (16, 16, 16)
+        # self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1) # (16, 16, 16) -> (32, 8, 8)
         self.fc_z = nn.Linear(m, latent_size)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
+        # x = F.relu(self.conv2(x))
         x = x.view(x.size(0), -1)
         z = self.fc_z(x)
 
