@@ -7,4 +7,3 @@ Dockerfile
 frames/
 *.p
 *.txt
-*.ipynb
