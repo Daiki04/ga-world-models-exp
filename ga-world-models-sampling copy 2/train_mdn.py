@@ -111,6 +111,32 @@ class RolloutGenerator(object):
         mus, sigmas, logpi, rs, d, next_hidden = self.mdrnn(action, latent_z, hidden) # MDRNNによる次の潜在状態と次の隠れ状態の推定
 
         return action.squeeze().cpu().numpy(), next_hidden
+    
+    def get_random_action_and_transition(self, obs, hidden):
+        """ 行動を起こし、遷移
+
+        VAEを用いて観測値を潜在状態に変換し、MDRNNを用いて次の潜在状態と次の隠れ状態の推定を行い、コントローラに対応するアクションを計算する。
+
+        :args obs: current observation (1 x 3 x 64 x 64) torch tensor
+        :args hidden: current hidden state (1 x 256) torch tensor
+
+        :returns: (action, next_hidden)
+            - action: 1D np array
+            - next_hidden (1 x 256) torch tensor
+        """
+        _, latent_z, _, _ = self.vae(obs) # latent_z: 潜在ベクトルの期待値
+        
+        self.rollout_latents.append(latent_z.squeeze().cpu().numpy()) # ロールアウトの潜在状態の追加
+
+        steering = np.random.uniform(-1, 1)
+        acceleration = np.random.uniform(0, 1)
+        brake = np.random.uniform(0, 1)
+        action = np.array([steering, acceleration, brake])
+        action = torch.from_numpy(action).float().unsqueeze(0).to(self.device)
+
+        mus, sigmas, logpi, rs, d, next_hidden = self.mdrnn(action, latent_z, hidden) # MDRNNによる次の潜在状態と次の隠れ状態の推定
+
+        return action.squeeze().cpu().numpy(), next_hidden
 
 
     def do_rollout(self, render=False,  early_termination=True):
@@ -127,64 +153,126 @@ class RolloutGenerator(object):
         self.rollout_rewards = []
         self.rollout_dones = []
 
-        with torch.no_grad():
-            
-            self.env = gym.make('CarRacing-v2', render_mode='rgb_array', domain_randomize=False) # 環境：CarRacing-v2
-
-            obs, _ = self.env.reset() # 環境のリセット
-
-            hidden = [
-                torch.zeros(1, RSIZE).to(self.device) # 隠れ状態の初期化
-                for _ in range(2)]
-            
-            self.rollout_hidden.append(hidden[0].cpu().numpy())
-
-            neg_count = 0 # 負の報酬を受け取った回数
-
-            cumulative = 0 # 累積報酬
-            i = 0
-            while True:
-                obs = transform(obs).unsqueeze(0).to(self.device) # 観測（画像）の前処理：obs(1, 3, 64, 64)
+        if np.random.rand() < 0.7:
+            with torch.no_grad():
                 
-                action, hidden = self.get_action_and_transition(obs, hidden) # 行動を起こし、遷移：action(1, ASIZE), hidden(1, RSIZE)
-                self.rollout_actions.append(action)
+                self.env = gym.make('CarRacing-v2', render_mode='rgb_array', domain_randomize=False) # 環境：CarRacing-v2
+
+                obs, _ = self.env.reset() # 環境のリセット
+
+                hidden = [
+                    torch.zeros(1, RSIZE).to(self.device) # 隠れ状態の初期化
+                    for _ in range(2)]
+                
                 self.rollout_hidden.append(hidden[0].cpu().numpy())
-                #Steering: Real valued in [-1, 1] 
-                #Gas: Real valued in [0, 1]
-                #Break: Real valued in [0, 1]
 
-                obs, reward, done, _, _ = self.env.step(action) # 行動を実行し、報酬を受け取る：obs(3, 64, 64), reward, done, info
-                self.rollout_rewards.append(reward)
-                self.rollout_dones.append(done)
-                #報酬を得られなかった（コース外に出たなど）連続回数をカウント
-                neg_count = neg_count+1 if reward < 0.0 else 0   
+                neg_count = 0 # 負の報酬を受け取った回数
 
-                if render:
-                    o = self.env.render("human") # 環境の描画
-                
-                #トレーニングのスピードアップのために、コース外の評価を行い，20time step以上コース外に出た場合はロールアウトを終了する
-                if (neg_count>20 and early_termination):  
-                    done = True
-                
-                cumulative += reward # 累積報酬の更新
-                
-                # ロールアウトの終了：タイムリミットに達した場合、早期終了した場合, 完了した場合
-                if done or (early_termination and i > self.time_limit):
-                    self.env.close()
-                    obs = transform(obs).unsqueeze(0).to(self.device)
-                    _, latent_z, _, _ = self.vae(obs)
-                    self.rollout_latents.append(latent_z.squeeze().cpu().numpy())
+                cumulative = 0 # 累積報酬
+                i = 0
+                while True:
+                    obs = transform(obs).unsqueeze(0).to(self.device) # 観測（画像）の前処理：obs(1, 3, 64, 64)
                     
-                    self.rollout_hidden = np.array(self.rollout_hidden)
-                    self.rollout_latents = np.array(self.rollout_latents)
-                    self.rollout_actions = np.array(self.rollout_actions)
-                    self.rollout_rewards = np.array(self.rollout_rewards)
-                    self.rollout_dones = np.array(self.rollout_dones)
+                    action, hidden = self.get_action_and_transition(obs, hidden) # 行動を起こし、遷移：action(1, ASIZE), hidden(1, RSIZE)
+                    self.rollout_actions.append(action)
+                    self.rollout_hidden.append(hidden[0].cpu().numpy())
+                    #Steering: Real valued in [-1, 1] 
+                    #Gas: Real valued in [0, 1]
+                    #Break: Real valued in [0, 1]
 
-                    rollout_current_hidden = self.rollout_hidden[:-1]
-                    rollout_next_hidden = self.rollout_hidden[1:]
-            
-                    return cumulative, rollout_current_hidden, rollout_next_hidden, self.rollout_latents, self.rollout_actions, self.rollout_rewards, self.rollout_dones
+                    obs, reward, done, _, _ = self.env.step(action) # 行動を実行し、報酬を受け取る：obs(3, 64, 64), reward, done, info
+                    self.rollout_rewards.append(reward)
+                    self.rollout_dones.append(done)
+                    #報酬を得られなかった（コース外に出たなど）連続回数をカウント
+                    neg_count = neg_count+1 if reward < 0.0 else 0   
 
-                i += 1
+                    if render:
+                        o = self.env.render("human") # 環境の描画
+                    
+                    #トレーニングのスピードアップのために、コース外の評価を行い，20time step以上コース外に出た場合はロールアウトを終了する
+                    if (neg_count>20 and early_termination):  
+                        done = True
+                    
+                    cumulative += reward # 累積報酬の更新
+                    
+                    # ロールアウトの終了：タイムリミットに達した場合、早期終了した場合, 完了した場合
+                    if done or (early_termination and i > self.time_limit):
+                        self.env.close()
+                        obs = transform(obs).unsqueeze(0).to(self.device)
+                        _, latent_z, _, _ = self.vae(obs)
+                        self.rollout_latents.append(latent_z.squeeze().cpu().numpy())
+                        
+                        self.rollout_hidden = np.array(self.rollout_hidden)
+                        self.rollout_latents = np.array(self.rollout_latents)
+                        self.rollout_actions = np.array(self.rollout_actions)
+                        self.rollout_rewards = np.array(self.rollout_rewards)
+                        self.rollout_dones = np.array(self.rollout_dones)
 
+                        rollout_current_hidden = self.rollout_hidden[:-1]
+                        rollout_next_hidden = self.rollout_hidden[1:]
+                
+                        return cumulative, rollout_current_hidden, rollout_next_hidden, self.rollout_latents, self.rollout_actions, self.rollout_rewards, self.rollout_dones
+
+                    i += 1
+                
+        else:
+            with torch.no_grad():
+                
+                self.env = gym.make('CarRacing-v2', render_mode='rgb_array', domain_randomize=False) # 環境：CarRacing-v2
+
+                obs, _ = self.env.reset() # 環境のリセット
+
+                hidden = [
+                    torch.zeros(1, RSIZE).to(self.device) # 隠れ状態の初期化
+                    for _ in range(2)]
+                
+                self.rollout_hidden.append(hidden[0].cpu().numpy())
+
+                neg_count = 0 # 負の報酬を受け取った回数
+
+                cumulative = 0 # 累積報酬
+                i = 0
+                while True:
+                    obs = transform(obs).unsqueeze(0).to(self.device) # 観測（画像）の前処理：obs(1, 3, 64, 64)
+                    
+                    action, hidden = self.get_random_action_and_transition(obs, hidden) # 行動を起こし、遷移：action(1, ASIZE), hidden(1, RSIZE)
+                    self.rollout_actions.append(action)
+                    self.rollout_hidden.append(hidden[0].cpu().numpy())
+                    #Steering: Real valued in [-1, 1] 
+                    #Gas: Real valued in [0, 1]
+                    #Break: Real valued in [0, 1]
+
+                    obs, reward, done, _, _ = self.env.step(action) # 行動を実行し、報酬を受け取る：obs(3, 64, 64), reward, done, info
+                    self.rollout_rewards.append(reward)
+                    self.rollout_dones.append(done)
+                    #報酬を得られなかった（コース外に出たなど）連続回数をカウント
+                    neg_count = neg_count+1 if reward < 0.0 else 0   
+
+                    if render:
+                        o = self.env.render("human") # 環境の描画
+                    
+                    #トレーニングのスピードアップのために、コース外の評価を行い，20time step以上コース外に出た場合はロールアウトを終了する
+                    if (neg_count>20 and early_termination):  
+                        done = True
+                    
+                    cumulative += reward # 累積報酬の更新
+                    
+                    # ロールアウトの終了：タイムリミットに達した場合、早期終了した場合, 完了した場合
+                    if done or (early_termination and i > self.time_limit):
+                        self.env.close()
+                        obs = transform(obs).unsqueeze(0).to(self.device)
+                        _, latent_z, _, _ = self.vae(obs)
+                        self.rollout_latents.append(latent_z.squeeze().cpu().numpy())
+                        
+                        self.rollout_hidden = np.array(self.rollout_hidden)
+                        self.rollout_latents = np.array(self.rollout_latents)
+                        self.rollout_actions = np.array(self.rollout_actions)
+                        self.rollout_rewards = np.array(self.rollout_rewards)
+                        self.rollout_dones = np.array(self.rollout_dones)
+
+                        rollout_current_hidden = self.rollout_hidden[:-1]
+                        rollout_next_hidden = self.rollout_hidden[1:]
+                
+                        return cumulative, rollout_current_hidden, rollout_next_hidden, self.rollout_latents, self.rollout_actions, self.rollout_rewards, self.rollout_dones
+
+                    i += 1
