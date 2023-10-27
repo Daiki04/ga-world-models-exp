@@ -4,7 +4,7 @@ from torchvision import transforms
 from multiprocessing import Lock
 import numpy as np
 from models import MDRNNCell, VAE, Controller
-import gym
+self.env = gym.make('CarRacing-v2', render_mode='rgb_array', domain_randomize=False) # 環境：CarRacing-v2
 import copy
 import random
 

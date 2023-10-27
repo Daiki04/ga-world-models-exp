@@ -97,7 +97,7 @@ class RolloutGenerator(object):
         m = torch.load(mdn_filename) # ファイルから個体をロード
 
         self.vae.load_state_dict( s['vae']) # vaeに個体のvaeのパラメータをロード
-        # self.controller.load_state_dict( s['controller']) # controllerに個体のcontrollerのパラメータをロード
+        self.controller.load_state_dict( s['controller']) # controllerに個体のcontrollerのパラメータをロード
         self.mdrnn.load_state_dict( s['mdrnn']) # mdrnnに個体のmdrnnのパラメータをロード
         self.mdrnn.gmm_linear.load_state_dict( m['mdn']) # mdrnnに個体のmdrnnのパラメータをロード
 
@@ -139,14 +139,22 @@ class RolloutGenerator(object):
         """
         # Discrete VAEの場合、離散化する
 
-        action = self.controller(latent_z, hidden[0] ) # コントローラーによるアクションの計算
+        # action = self.controller(latent_z, hidden[0] ) # コントローラーによるアクションの計算
+
+        # # ランダムなアクションの選択
+        steer = random.uniform(-1, 1)
+        gas = random.uniform(0, 1)
+        brake = random.uniform(0, 1)
+        action = np.array([steer, gas, brake])
+
+        action = torch.from_numpy(action).float().unsqueeze(0).to(self.device) # アクションのテンソル化
 
         mus, sigmas, logpi, rs, d, next_hidden = self.mdrnn(action, latent_z, hidden) # MDRNNによる次の潜在状態と次の隠れ状態の推定
 
         # 次の潜在状態のサンプリング
         next_latent_z = self.get_latent_mdn(mus, sigmas, logpi)
         reward = torch.sigmoid(rs) # 報酬のシグモイド関数による変換
-        reward = torch.where(reward > 0.9, torch.tensor(1.0), torch.tensor(0.0))
+        reward = torch.where(reward > 0.7, torch.tensor(1.0), torch.tensor(0.0))
         reward = reward.cpu().numpy()
 
         return action.squeeze().cpu().numpy(), next_hidden, next_latent_z, reward
@@ -203,8 +211,8 @@ class RolloutGenerator(object):
                     o = self.env.render("human") # 環境の描画
                 
                 #トレーニングのスピードアップのために、コース外の評価を行い，20time step以上コース外に出た場合はロールアウトを終了する
-                if (neg_count>20 and early_termination):  
-                    done = True
+                # if (neg_count>20 and early_termination):  
+                #     done = True
                 
                 cumulative += reward # 累積報酬の更新
                 
