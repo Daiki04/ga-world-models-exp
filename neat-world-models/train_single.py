@@ -23,7 +23,7 @@ env = gym.make('CarRacing-v2', render_mode='rgb_array',
                domain_randomize=False)  # 環境：CarRacing-v2
 
 # A: Action space, L: Latent space, R: Recurrent space, RED: Reduced size
-ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE = 3, 32, 256, 32, 32
+ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE = 3, 32, 256, 64, 64
 
 # 画像の前処理：1. PILイメージに変換、2. 64x64にリサイズ、3. テンソルに変換
 transform = transforms.Compose([
@@ -41,7 +41,7 @@ def eval_genomes(genomes, config):
         obs, _ = env.reset()  # 環境をリセット
         net = neat.nn.RecurrentNetwork.create(genome, config)
 
-        for _ in range(3):
+        for _ in range(5):
             time_count = 0
             cumulative = 0
             neg_reward = 0
@@ -70,7 +70,7 @@ def eval_genomes(genomes, config):
                     total_reward += cumulative
                     break
 
-        genome.fitness = total_reward / 3
+        genome.fitness = total_reward / 5
         print(f"id:{genome_id}, fitness: {genome.fitness}")
 
 
@@ -83,13 +83,13 @@ if __name__ == '__main__':
     p = Population(conf)
 
     # run
-    pe = neat.ParallelEvaluator(multiprocessing.cpu_count(), eval_genomes)
-    winner = p.run(pe.evaluate)
+    winner = p.run(eval_genomes, 300)
 
     # make result directory
     result_dir = './result_single' + str(int(time.time()))
     os.mkdir(result_dir)
 
+    winner = p.reporters.best_genome()
     # save best genome
     np.save(result_dir + '/best.npy', winner)
 
